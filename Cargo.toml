@@ -1,0 +1,33 @@
+[package]
+name = "serial_udp_forwarder"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Tokio is the asynchronous runtime used throughout this program.  The
+# `full` feature enables the networking, timing and I/O utilities used
+# here.
+tokio = { version = "1", features = ["full"] }
+
+# Tokio‑serial wraps the cross‑platform serialport crate and exposes an
+# asynchronous `SerialStream` type.  It provides the `open_native_async`
+# method via the `SerialPortBuilderExt` trait for non‑blocking access to
+# serial devices【344358493076465†L120-L150】.
+tokio-serial = "5"
+
+# The `serialport` crate is used only for enumerating available ports and
+# retrieving USB vendor and product information.  When built with its
+# default features this enumeration returns rich metadata on systems
+# where libudev is available【41378760481648†L41-L49】.
+serialport = { version = "4" }
+
+# Clap makes it easy to build modern command‑line interfaces using derive
+# macros.
+clap = { version = "4", features = ["derive"] }
+
+# For convenient error handling we depend on `anyhow`.  This is strictly
+# optional but improves readability of error propagation in the async
+# context.
+anyhow = "1"
