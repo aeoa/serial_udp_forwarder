@@ -50,7 +50,7 @@ struct RunArgs {
     #[arg(long)]
     port: Option<String>,
 
-    /// USB vendor ID to select the port by (accepts decimal or hex, e.g. `0403`)
+    /// USB vendor ID to select the port by (accepts decimal or hex, e.g. `0x0403`)
     #[arg(long)]
     vid: Option<String>,
 

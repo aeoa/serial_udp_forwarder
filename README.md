@@ -30,7 +30,7 @@ Options:
       --port <PORT>
           Path/name of the serial port (e.g. `/dev/ttyUSB0` or `COM3`). If omitted, a device is selected based on the vendor/product identifiers or name substring
       --vid <VID>
-          USB vendor ID to select the port by (accepts decimal or hex, e.g. `0403`)
+          USB vendor ID to select the port by (accepts decimal or hex, e.g. `0x0403`)
       --pid <PID>
           USB product ID to select the port by (accepts decimal or hex)
       --manufacturer <MANUFACTURER>
