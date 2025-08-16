@@ -92,8 +92,8 @@ struct RunArgs {
     #[arg(long)]
     udp_port: u16,
 
-    /// Maximum number of in‑flight messages.  When the buffer is full, reads
-    /// from the serial port will pause until the sender drains some messages.
+    /// Maximum number of in‑flight messages.  When the buffer is full, the
+    /// oldest message will be dropped.
     #[arg(long, default_value_t = 100)]
     buffer: usize,
 

@@ -48,7 +48,7 @@ Options:
       --udp-port <UDP_PORT>
           Destination UDP port
       --buffer <BUFFER>
-          Maximum number of in‑flight messages.  When the buffer is full, reads from the serial port will pause until the sender drains some messages [default: 100]
+          Maximum number of in‑flight messages.  When the buffer is full, the oldest message will be dropped.
       --stats-interval <STATS_INTERVAL>
           Interval in seconds at which throughput statistics are printed [default: 1]
       --show-last
