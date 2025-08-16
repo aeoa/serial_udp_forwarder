@@ -140,7 +140,7 @@ async fn list_devices() -> Result<()> {
         print!("{}", info.port_name);
         match info.port_type {
             SerialPortType::UsbPort(ref usb) => {
-                print!(" (USB vid: {:04x}, pid: {:04x}", usb.vid, usb.pid);
+                print!(" (USB vid: 0x{:04x}, pid: 0x{:04x}", usb.vid, usb.pid);
                 if let Some(ref manuf) = usb.manufacturer {
                     print!(", manufacturer: {}", manuf);
                 }
