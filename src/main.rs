@@ -24,6 +24,10 @@ use tokio::time::{self, Duration};
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 use tokio_serial::SerialPortType;
 
+// For optional message logging to a file we need asynchronous file writing.
+use tokio::io::AsyncWriteExt;
+use tokio::fs::{File, OpenOptions};
+
 /// Command line interface for the serial‑UDP forwarder.
 #[derive(Parser, Debug)]
 #[command(name = "serial_udp_forwarder", author, version, about = "Forward serial port messages to UDP")] 
@@ -108,6 +112,13 @@ struct RunArgs {
     /// line.
     #[arg(long, default_value_t = false)]
     show_last: bool,
+
+    /// Optional log file path.  When set, every complete message received
+    /// from the serial port will be appended to this file using raw bytes
+    /// (including the delimiter).  This allows offline inspection of the
+    /// entire data stream without any encoding assumptions.
+    #[arg(long, value_name = "PATH")]
+    log: Option<String>,
 
 }
 
@@ -382,7 +393,10 @@ fn spawn_serial_reader_ring(
     capacity: usize,
     notify: Arc<Notify>,
     last_msg: Option<Arc<Mutex<Option<Vec<u8>>>>>,
+    log_file: Option<Arc<Mutex<File>>>,
 ) {
+    // Clone the delimiter so it can be moved into the async task.
+    let delim_clone = delimiter.clone();
     tokio::spawn(async move {
         let mut buffer: Vec<u8> = Vec::new();
         let mut temp = [0u8; 512];
@@ -398,6 +412,19 @@ fn spawn_serial_reader_ring(
                             if let Some(ref last) = last_msg {
                                 let mut guard = last.lock().await;
                                 *guard = Some(msg.clone());
+                            }
+                            // Write to log file if provided.  We append the raw
+                            // message bytes followed by the delimiter to
+                            // reconstruct the original stream.  Errors are
+                            // printed but do not terminate the forwarder.
+                            if let Some(ref file) = log_file {
+                                let mut f = file.lock().await;
+                                if let Err(e) = f.write_all(&msg).await {
+                                    eprintln!("Error writing log: {e}");
+                                }
+                                if let Err(e) = f.write_all(&delim_clone).await {
+                                    eprintln!("Error writing log: {e}");
+                                }
                             }
                             // Push the message into the ring buffer, dropping the
                             // oldest entry if the capacity is reached.
@@ -566,6 +593,23 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
         None
     };
 
+    // If a log file path was provided, open it for appending.  We create
+    // the file if it does not exist.  We wrap the file in an Arc<Mutex<...>>
+    // so it can be shared safely between tasks.  Any errors opening the
+    // file are propagated to the caller.  When no log path is specified
+    // this remains `None`.
+    let log_file: Option<Arc<Mutex<File>>> = if let Some(ref path) = args.log {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .await
+            .with_context(|| format!("failed to open log file {}", path))?;
+        Some(Arc::new(Mutex::new(file)))
+    } else {
+        None
+    };
+
     // Spawn tasks using the ring buffer.  The reader pushes messages into
     // the queue and notifies the writer.  The writer drains the queue and
     // sends the messages over UDP.  Both tasks operate asynchronously.
@@ -576,6 +620,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
         args.buffer,
         Arc::clone(&notify),
         last_msg.clone(),
+        log_file.clone(),
     );
     spawn_udp_writer_ring(
         socket,
