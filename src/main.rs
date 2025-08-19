@@ -120,6 +120,13 @@ struct RunArgs {
     #[arg(long, value_name = "PATH")]
     log: Option<String>,
 
+    /// Apply a minimal hacky JSON messageType injection.  When set, and a
+    /// message starts with '{' and contains specific substrings, a
+    /// "messageType" field will be inserted right after the opening
+    /// brace.  This is intentionally simple and best-effort.
+    #[arg(long, default_value_t = false)]
+    hack: bool,
+
 }
 
 #[tokio::main]
@@ -209,7 +216,7 @@ fn decode_terminator(input: &str) -> Vec<u8> {
                     '0' => bytes.push(b'\0'),
                     '\\' => bytes.push(b'\\'),
                     _ => {
-                        // Unknown escape – treat both characters literally
+                        // Unknown escape – treat the escaped char literally
                         bytes.push(next as u8);
                     }
                 }
@@ -224,9 +231,6 @@ fn decode_terminator(input: &str) -> Vec<u8> {
     bytes
 }
 
-/// Find the serial port that matches the provided selectors.  The first
-/// non‑none criteria among `vid`/`pid` or `name` is used.  If a port name
-/// is provided directly it is returned without enumeration.
 fn select_port(args: &RunArgs) -> Result<String> {
     if let Some(ref port) = args.port {
         return Ok(port.clone());
@@ -394,6 +398,7 @@ fn spawn_serial_reader_ring(
     notify: Arc<Notify>,
     last_msg: Option<Arc<Mutex<Option<Vec<u8>>>>>,
     log_file: Option<Arc<Mutex<File>>>,
+    hack: bool,
 ) {
     // Clone the delimiter so it can be moved into the async task.
     let delim_clone = delimiter.clone();
@@ -407,7 +412,32 @@ fn spawn_serial_reader_ring(
                         buffer.push(byte);
                         if buffer.ends_with(&delimiter) {
                             let msg_len = buffer.len() - delimiter.len();
-                            let msg = buffer[..msg_len].to_vec();
+                            let mut msg = buffer[..msg_len].to_vec();
+                            // Apply minimal hack at the input side so the
+                            // modified message is visible to logging and all
+                            // downstream consumers.
+                            if hack {
+                                if let Ok(s) = std::str::from_utf8(&msg) {
+                                    if let Some(brace_idx) = s.find('{') {
+                                        let insert = if s.contains("relPosHeading") {
+                                            Some("\"messageType\": \"GnssHeading\", ")
+                                        } else if s.contains("fixType") {
+                                            Some("\"messageType\": \"GnssHeadingNavPVT\", ")
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(ins) = insert {
+                                            let split_at = brace_idx + 1;
+                                            let (head, tail) = s.split_at(split_at);
+                                            let mut new = String::with_capacity(msg.len() + ins.len());
+                                            new.push_str(head);
+                                            new.push_str(ins);
+                                            new.push_str(tail);
+                                            msg = new.into_bytes();
+                                        }
+                                    }
+                                }
+                            }
                             // Update last message tracker if provided
                             if let Some(ref last) = last_msg {
                                 let mut guard = last.lock().await;
@@ -560,10 +590,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
     let port_name = select_port(&args)?;
     println!("Using serial port: {}", port_name);
 
-    // Build and open the serial port asynchronously.  The
-    // `open_native_async` method is provided by the `SerialPortBuilderExt`
-    // trait【344358493076465†L120-L150】 and returns a `SerialStream` which
-    // implements both `AsyncRead` and `AsyncWrite`【390261871706494†L303-L339】.
+    // Build and open the serial port asynchronously.
     let builder = tokio_serial::new(Cow::from(port_name.as_str()), args.baud);
     let serial = builder
         .open_native_async()
@@ -576,9 +603,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:0").await
         .context("failed to bind UDP socket")?;
 
-    // Bounded ring buffer for complete messages.  When the capacity is
-    // exceeded the oldest entry is dropped.  Access to the buffer is
-    // synchronized via a mutex, and a notify is used to signal the writer.
+    // Bounded ring buffer for complete messages.
     let queue: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(VecDeque::new()));
     let notify = Arc::new(Notify::new());
     let counter = Arc::new(AtomicU64::new(0));
@@ -593,11 +618,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
         None
     };
 
-    // If a log file path was provided, open it for appending.  We create
-    // the file if it does not exist.  We wrap the file in an Arc<Mutex<...>>
-    // so it can be shared safely between tasks.  Any errors opening the
-    // file are propagated to the caller.  When no log path is specified
-    // this remains `None`.
+    // If a log file path was provided, open it for appending.
     let log_file: Option<Arc<Mutex<File>>> = if let Some(ref path) = args.log {
         let file = OpenOptions::new()
             .create(true)
@@ -610,9 +631,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
         None
     };
 
-    // Spawn tasks using the ring buffer.  The reader pushes messages into
-    // the queue and notifies the writer.  The writer drains the queue and
-    // sends the messages over UDP.  Both tasks operate asynchronously.
+    // Spawn tasks using the ring buffer. Reader applies input-side hack when enabled.
     spawn_serial_reader_ring(
         serial,
         delimiter,
@@ -621,6 +640,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
         Arc::clone(&notify),
         last_msg.clone(),
         log_file.clone(),
+        args.hack,
     );
     spawn_udp_writer_ring(
         socket,
@@ -633,8 +653,7 @@ async fn run_forwarder(args: RunArgs) -> Result<()> {
 
     println!("Started forwarding. Press Ctrl+C to stop.");
 
-    // Wait for Ctrl‑C (SIGINT) to shut down.  Without this the program would
-    // exit immediately after spawning the tasks.
+    // Wait for Ctrl‑C (SIGINT) to shut down.
     tokio::signal::ctrl_c().await?;
     println!("Received interrupt, shutting down...");
     Ok(())
