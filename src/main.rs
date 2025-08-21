@@ -415,18 +415,19 @@ fn spawn_serial_reader_ring(
                             let mut msg = buffer[..msg_len].to_vec();
                             // Apply minimal hack at the input side so the
                             // modified message is visible to logging and all
-                            // downstream consumers.
+                            // downstream consumers.  If the hack is enabled and
+                            // the payload contains "fixType" we drop the
+                            // message entirely.  Otherwise, perform the
+                            // lightweight insertion for relPosHeading.
+                            let mut drop_message = false;
                             if hack {
                                 if let Ok(s) = std::str::from_utf8(&msg) {
-                                    if let Some(brace_idx) = s.find('{') {
-                                        let insert = if s.contains("relPosHeading") {
-                                            Some("\"messageType\": \"GnssHeading\", ")
-                                        } else if s.contains("fixType") {
-                                            Some("\"messageType\": \"GnssHeadingNavPVT\", ")
-                                        } else {
-                                            None
-                                        };
-                                        if let Some(ins) = insert {
+                                    // If the payload contains "fixType" we drop it.
+                                    if s.contains("fixType") {
+                                        drop_message = true;
+                                    } else if let Some(brace_idx) = s.find('{') {
+                                        if s.contains("relPosHeading") {
+                                            let ins = "\"Packet_Type\":25,";
                                             let split_at = brace_idx + 1;
                                             let (head, tail) = s.split_at(split_at);
                                             let mut new = String::with_capacity(msg.len() + ins.len());
@@ -437,6 +438,11 @@ fn spawn_serial_reader_ring(
                                         }
                                     }
                                 }
+                            }
+                            if drop_message {
+                                // Drop this message and continue reading the next one.
+                                buffer.clear();
+                                continue;
                             }
                             // Update last message tracker if provided
                             if let Some(ref last) = last_msg {
