@@ -129,8 +129,17 @@ struct RunArgs {
 
 }
 
+use windows::Win32::System::Power::{
+    SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_AWAYMODE_REQUIRED,
+};
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Prevent system sleep (and away mode)
+    unsafe {
+        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
+    }
+
     let cli = Cli::parse();
     match cli.command {
         Commands::ListDevices => {
@@ -427,7 +436,7 @@ fn spawn_serial_reader_ring(
                                         drop_message = true;
                                     } else if let Some(brace_idx) = s.find('{') {
                                         if s.contains("relPosHeading") {
-                                            let ins = "\"Packet_Type\":25,";
+                                            let ins = "\"Packet_Type\":24,";
                                             let split_at = brace_idx + 1;
                                             let (head, tail) = s.split_at(split_at);
                                             let mut new = String::with_capacity(msg.len() + ins.len());

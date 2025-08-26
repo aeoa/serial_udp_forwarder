@@ -31,3 +31,6 @@ clap = { version = "4", features = ["derive"] }
 # optional but improves readability of error propagation in the async
 # context.
 anyhow = "1"
+
+# for anti sleep
+windows = {version="0.61.3", features = ["Win32", "Win32_System", "Win32_System_Power"]}
